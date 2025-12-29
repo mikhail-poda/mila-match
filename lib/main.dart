@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:collection/collection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -30,35 +30,17 @@ class WordPair {
   final String hebrew;
   final String english;
 
-  WordPair({
-    required this.hebrew,
-    required this.english,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'hebrew': hebrew,
-        'english': english,
-      };
-
-  factory WordPair.fromJson(Map<String, dynamic> json) => WordPair(
-        hebrew: json['hebrew'],
-        english: json['english'],
-      );
+  WordPair({required this.hebrew, required this.english});
 }
 
 class GameProgress {
   final int currentChunkIndex;
 
-  GameProgress({
-    required this.currentChunkIndex,
-  });
+  GameProgress({required this.currentChunkIndex});
 
-  Map<String, dynamic> toJson() => {
-        'currentChunkIndex': currentChunkIndex,
-      };
+  Map<String, dynamic> toJson() => {'currentChunkIndex': currentChunkIndex};
 
-  factory GameProgress.fromJson(Map<String, dynamic> json) =>
-      GameProgress(currentChunkIndex: json['currentChunkIndex'] ?? 0);
+  factory GameProgress.fromJson(Map<String, dynamic> json) => GameProgress(currentChunkIndex: json['currentChunkIndex'] ?? 0);
 }
 
 class MatchingGameScreen extends StatefulWidget {
@@ -68,19 +50,19 @@ class MatchingGameScreen extends StatefulWidget {
   State<MatchingGameScreen> createState() => _MatchingGameScreenState();
 }
 
-class _MatchingGameScreenState extends State<MatchingGameScreen>
-    with SingleTickerProviderStateMixin {
-  static const String version = '1.0';
+class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTickerProviderStateMixin {
+  static const String version = '1.4';
   static const String prefsKey = 'hebrew_matching_progress';
+
+  final GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
+  final GlobalKey<AnimatedListState> _hebrewListKey = GlobalKey<AnimatedListState>();
+  final GlobalKey<AnimatedListState> _englishListKey = GlobalKey<AnimatedListState>();
 
   List<List<WordPair>> chunks = [];
   int currentChunkIndex = 0;
-
   List<WordPair> currentChunk = [];
   List<WordPair> hebrewList = [];
   List<WordPair> englishList = [];
-
-  // Track matched pairs in order (stack)
   List<Map<String, WordPair>> matchedPairs = [];
 
   WordPair? selectedHebrew;
@@ -89,6 +71,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
   WordPair? flashingEnglish;
 
   bool isLoading = true;
+  bool isProcessing = false;
   String? error;
   AnimationController? _animationController;
 
@@ -114,22 +97,18 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
         isLoading = true;
         error = null;
       });
-
       final content = await rootBundle.loadString('assets/vocabulary.tsv');
       chunks = _parseChunks(content);
 
-      // Load progress
       final prefs = await SharedPreferences.getInstance();
       final progressJson = prefs.getString(prefsKey);
 
       if (progressJson != null) {
         final progress = GameProgress.fromJson(json.decode(progressJson));
-        currentChunkIndex =
-            progress.currentChunkIndex.clamp(0, chunks.length - 1);
+        currentChunkIndex = progress.currentChunkIndex.clamp(0, max(0, chunks.length - 1));
       }
 
       _loadChunk();
-
       setState(() {
         isLoading = false;
       });
@@ -141,33 +120,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
     }
   }
 
-  List<List<WordPair>> _splitIntoBalancedChunks(
-      List<WordPair> items, int maxSize) {
-    int n = items.length;
-    if (maxSize <= 0) {
-      throw ArgumentError('Max chunk size must be greater than 0');
-    }
-    if (n == 0) return [];
-
-    // Calculate the minimum number of chunks required
-    int numChunks = (n / maxSize).ceil();
-
-    // Determine base size and how many chunks get an extra item
-    int baseSize = n ~/ numChunks;
-    int remainder = n % numChunks;
-
-    List<List<WordPair>> chunks = [];
-    int currentIndex = 0;
-
-    for (int i = 0; i < numChunks; i++) {
-      // The first 'remainder' chunks get (baseSize + 1) items
-      int currentChunkSize = (i < remainder) ? baseSize + 1 : baseSize;
-
-      chunks.add(items.sublist(currentIndex, currentIndex + currentChunkSize));
-      currentIndex += currentChunkSize;
-    }
-
-    return chunks;
+  Future<void> _saveProgress() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final progress = GameProgress(currentChunkIndex: currentChunkIndex);
+      await prefs.setString(prefsKey, json.encode(progress.toJson()));
+    } catch (e) {}
   }
 
   List<List<WordPair>> _parseChunks(String content) {
@@ -180,18 +138,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
         .map(_parseChunkLines)
         .toList();
 
-    // Process chunks: shuffle and split if needed
-    final processedChunks = rawChunks.expand((chunk) {
+    return rawChunks.expand((chunk) {
       chunk.shuffle();
-      return chunk.length > 6
-          ? _splitIntoBalancedChunks(chunk, 6)
-          : [chunk];
+      return chunk.length > 6 ? _splitIntoBalancedChunks(chunk, 6) : [chunk];
     }).toList();
-
-    return processedChunks;
   }
 
-  // Parse a chunk of TSV lines into WordPairs
   static List<WordPair> _parseChunkLines(List<String> lines) {
     return lines
         .map((line) => line.split('\t'))
@@ -201,366 +153,247 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
         .toList();
   }
 
+  List<List<WordPair>> _splitIntoBalancedChunks(List<WordPair> items, int maxSize) {
+    int n = items.length;
+    int numChunks = (n / maxSize).ceil();
+    int baseSize = n ~/ numChunks;
+    int remainder = n % numChunks;
+    List<List<WordPair>> res = [];
+    int currentIndex = 0;
+    for (int i = 0; i < numChunks; i++) {
+      int size = (i < remainder) ? baseSize + 1 : baseSize;
+      res.add(items.sublist(currentIndex, currentIndex + size));
+      currentIndex += size;
+    }
+    return res;
+  }
+
   void _loadChunk() {
     if (chunks.isEmpty) return;
+    setState(() {
+      currentChunk = List.from(chunks[currentChunkIndex]);
+      hebrewList = List.from(currentChunk);
+      englishList = List.from(currentChunk);
 
-    currentChunk = List.from(chunks[currentChunkIndex]);
+      final nextIdx = (currentChunkIndex + 1) % chunks.length;
+      final extraWord = chunks[nextIdx][Random().nextInt(chunks[nextIdx].length)];
+      englishList.add(extraWord);
 
-    // Create Hebrew and English lists with randomized order
-    hebrewList = List.from(currentChunk);
-    englishList = List.from(currentChunk);
-
-    // Add one extra English word from next chunk (or previous if on last chunk)
-    final extraChunkIndex = currentChunkIndex < chunks.length - 1 ? currentChunkIndex + 1 : 0;
-    final nextChunk = chunks[extraChunkIndex];
-    final extraWord = nextChunk[Random().nextInt(nextChunk.length)];
-    englishList.add(extraWord);
-
-    hebrewList.shuffle();
-    englishList.shuffle();
-
-    matchedPairs = [];
-    selectedHebrew = null;
-    errorEnglish = null;
-    flashingHebrew = null;
-    flashingEnglish = null;
-  }
-
-  Future<void> _saveProgress() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final progress = GameProgress(currentChunkIndex: currentChunkIndex);
-      await prefs.setString(prefsKey, json.encode(progress.toJson()));
-    } catch (e) {
-      _showError('Error saving progress: $e');
-    }
-  }
-
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      hebrewList.shuffle();
+      englishList.shuffle();
+      matchedPairs = [];
+      selectedHebrew = null;
+      errorEnglish = null;
+      flashingHebrew = null;
+      flashingEnglish = null;
+      isProcessing = false;
+    });
+    _saveProgress();
   }
 
   void _onHebrewTap(WordPair word) {
-    if (_isMatched(word)) return;
-
+    if (isProcessing) return;
     setState(() {
       selectedHebrew = word;
       errorEnglish = null;
     });
   }
 
-  bool _isMatched(WordPair word) {
-    return matchedPairs
-        .any((pair) => pair['hebrew'] == word || pair['english'] == word);
-  }
-
   void _onEnglishTap(WordPair word) async {
-    if (_isMatched(word) || selectedHebrew == null) return;
+    if (selectedHebrew == null || isProcessing) return;
 
-    // Check if they're the same WordPair (correct match)
-    final isCorrect = selectedHebrew == word;
-
-    if (isCorrect) {
-      // Flash green with shake animation for 2 seconds
+    if (selectedHebrew == word) {
       setState(() {
+        isProcessing = true;
         flashingHebrew = selectedHebrew;
         flashingEnglish = word;
       });
+      await Future.delayed(const Duration(milliseconds: 600));
 
-      _animationController?.duration = const Duration(milliseconds: 2000);
-      _animationController?.forward(from: 0.0);
-      await Future.delayed(const Duration(seconds: 2));
+      final hIdx = hebrewList.indexOf(selectedHebrew!);
+      final eIdx = englishList.indexOf(word);
+      final pair = {'hebrew': selectedHebrew!, 'english': word};
+
+      matchedPairs.add(pair);
+      _matchedListKey.currentState?.insertItem(matchedPairs.length - 1);
+
+      hebrewList.removeAt(hIdx);
+      _hebrewListKey.currentState?.removeItem(hIdx, (c, a) => _buildHebrewItem(pair['hebrew']!, a, true));
+
+      englishList.removeAt(eIdx);
+      _englishListKey.currentState?.removeItem(eIdx, (c, a) => _buildEnglishItem(pair['english']!, a, true));
+
+      if (hebrewList.isEmpty) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (englishList.isNotEmpty) {
+          final last = englishList.removeAt(0);
+          _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true));
+        }
+      }
 
       setState(() {
-        matchedPairs.add({
-          'hebrew': selectedHebrew!,
-          'english': word,
-        });
         selectedHebrew = null;
         flashingHebrew = null;
         flashingEnglish = null;
-        errorEnglish = null;
+        isProcessing = false;
       });
     } else {
       setState(() {
         errorEnglish = word;
+        isProcessing = true;
       });
-
-      _animationController?.duration = const Duration(milliseconds: 500);
-      _animationController?.forward(from: 0.0).then((_) {
-        setState(() {
-          errorEnglish = null;
-        });
+      await _animationController?.forward(from: 0.0);
+      setState(() {
+        errorEnglish = null;
+        isProcessing = false;
       });
     }
   }
 
-  bool _isChunkComplete() {
-    return hebrewList.every((word) => _isMatched(word));
-  }
+  bool _isChunkComplete() => hebrewList.isEmpty && !isProcessing;
 
-  void _nextChunk() {
-    if (currentChunkIndex < chunks.length - 1) {
-      setState(() {
-        currentChunkIndex++;
-        _loadChunk();
-      });
-      _saveProgress();
-    } else {
-      // All chunks completed - restart from beginning
-      setState(() {
-        currentChunkIndex = 0;
-        _loadChunk();
-      });
-      _saveProgress();
-    }
-  }
-
-  void _repeatChunk() {
-    setState(() {
-      _loadChunk();
-    });
-  }
-
-  Widget _buildLoadingScreen() {
-    return const Center(
+  Widget _buildMatchedPairItem(Map<String, WordPair> pair, Animation<double> animation) {
+    return SizeTransition(
+      sizeFactor: animation,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 16),
-          Text('Loading vocabulary...'),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 4.0),
+            child: Row(
+              children: [
+                Expanded(
+                    flex: 2,
+                    child: Text(pair['hebrew']!.hebrew,
+                        style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
+                        textScaler: const TextScaler.linear(2),
+                        textAlign: TextAlign.right,
+                        textDirection: TextDirection.rtl)),
+                const SizedBox(width: 16),
+                Expanded(
+                    flex: 3, child: Text(pair['english']!.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(2))),
+              ],
+            ),
+          ),
+          const Divider(height: 1, thickness: 0.5),
         ],
       ),
     );
   }
 
-  Widget _buildErrorScreen() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Text(
-              'Error Loading Vocabulary',
-              style: Theme.of(context).textTheme.headlineSmall,
+  Widget _buildHebrewItem(WordPair word, Animation<double> animation, [bool isRemoving = false]) {
+    final isSelected = !isRemoving && selectedHebrew == word;
+    final isFlashing = !isRemoving && flashingHebrew == word;
+
+    return AnimatedBuilder(
+      animation: _animationController!,
+      builder: (context, child) {
+        final offset = isFlashing ? sin(_animationController!.value * pi * 8) * 3 : 0.0;
+        return Transform.translate(
+          offset: Offset(offset, 0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2.0),
+            child: InkWell(
+              onTap: isRemoving ? null : () => _onHebrewTap(word),
+              child: Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: (isFlashing || isSelected) ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8)) : null,
+                child: Text(word.hebrew,
+                    style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
+                    textScaler: const TextScaler.linear(2),
+                    textAlign: TextAlign.right,
+                    textDirection: TextDirection.rtl),
+              ),
             ),
-            const SizedBox(height: 8),
-            Text(error ?? 'Unknown error'),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _loadVocabulary,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Center(
-        child: Text(
-          '${currentChunkIndex + 1} / ${chunks.length}',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.normal, color: Colors.black45),
-        ),
-      ),
+  Widget _buildEnglishItem(WordPair word, Animation<double> animation, [bool isRemoving = false]) {
+    final isError = !isRemoving && errorEnglish == word;
+    final isFlashing = !isRemoving && flashingEnglish == word;
+
+    return AnimatedBuilder(
+      animation: _animationController!,
+      builder: (context, child) {
+        double offset = isError ? sin(_animationController!.value * pi * 4) * 5 : (isFlashing ? sin(_animationController!.value * pi * 8) * 3 : 0.0);
+        return Transform.translate(
+          offset: Offset(offset, 0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2.0),
+            child: InkWell(
+              onTap: isRemoving ? null : () => _onEnglishTap(word),
+              child: Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: isFlashing
+                    ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8))
+                    : (isError ? BoxDecoration(color: Colors.red.shade200, borderRadius: BorderRadius.circular(8)) : null),
+                child: Text(word.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(2)),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
   Widget _buildMatchingArea() {
-    // Get unmatched words
-    final unmatchedHebrew =
-        hebrewList.where((word) => !_isMatched(word)).toList();
-    final unmatchedEnglish = _isChunkComplete()
-        ? <WordPair>[]
-        : englishList.where((word) => !_isMatched(word)).toList();
+    if (_isChunkComplete()) {
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: ListView(
+            children: matchedPairs.map((p) => _buildMatchedPairItem(p, const AlwaysStoppedAnimation(1.0))).toList(),
+          ),
+        ),
+      );
+    }
 
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
           children: [
-            // Matched pairs section - in stack order (last matched at bottom)
-            if (matchedPairs.isNotEmpty) ...[
-              ...matchedPairs.expand((pair) {
-                final hebrewWord = pair['hebrew']!.hebrew;
-                final englishWord = pair['english']!.english;
-
-                return [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 8.0, horizontal: 4.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            hebrewWord,
-                            textScaler: const TextScaler.linear(2),
-                            style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
-                            textAlign: TextAlign.right,
-                            textDirection: TextDirection.rtl,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            englishWord,
-                            textScaler: const TextScaler.linear(2),
-                            style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
-                            textAlign: TextAlign.left,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1, thickness: 0.5),
-                ];
-              }).toList(),
-              const SizedBox(height: 16),
-            ],
-
-            // Unmatched pairs section
+            AnimatedList(
+              key: _matchedListKey,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              initialItemCount: matchedPairs.length,
+              itemBuilder: (context, index, animation) => _buildMatchedPairItem(matchedPairs[index], animation),
+            ),
+            if (matchedPairs.isNotEmpty) const SizedBox(height: 16),
             Expanded(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Hebrew column - narrower and offset by half row
+                  // Hebrew column
                   Flexible(
                     flex: 2,
                     child: Padding(
                       padding: const EdgeInsets.only(top: 22.0),
-                      // Half-row offset
-                      child: ListView.builder(
-                        itemCount: unmatchedHebrew.length,
-                        itemBuilder: (context, i) {
-                          final word = unmatchedHebrew[i];
-                          final isSelected = selectedHebrew == word;
-                          final isFlashing = flashingHebrew == word;
-
-                          return AnimatedBuilder(
-                            animation: _animationController!,
-                            builder: (context, child) {
-                              final successValue = isFlashing
-                                  ? _animationController!.value
-                                  : 0.0;
-                              final shakeOffset =
-                                  sin(successValue * pi * 8) * 3;
-
-                              return Transform.translate(
-                                offset: Offset(shakeOffset, 0),
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 2.0),
-                                  child: InkWell(
-                                    onTap: () => _onHebrewTap(word),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(12.0),
-                                      decoration: isFlashing
-                                          ? BoxDecoration(
-                                              color: Colors.green.shade200,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            )
-                                          : isSelected
-                                              ? BoxDecoration(
-                                                  color: Colors.green.shade200,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                )
-                                              : null,
-                                      child: Text(
-                                        word.hebrew,
-                                        textScaler: const TextScaler.linear(2),
-                                        style: TextStyle(
-                                            fontWeight: (isSelected || isFlashing) ? FontWeight.normal : FontWeight.normal,
-                                            height: 1.0
-                                        ),
-                                        textAlign: TextAlign.right,
-                                        textDirection: TextDirection.rtl,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
+                      child: AnimatedList(
+                        key: _hebrewListKey,
+                        initialItemCount: hebrewList.length,
+                        itemBuilder: (c, i, a) => _buildHebrewItem(hebrewList[i], a),
                       ),
                     ),
                   ),
 
-                  const SizedBox(width: 16),
+                  // THE VERTICAL SEPARATOR
+                  Container(
+                    width: 1,
+                    margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 30),
+                    color: Colors.black12,
+                  ),
 
-                  // English column - wider
+                  // English column
                   Flexible(
                     flex: 3,
-                    child: ListView.builder(
-                      itemCount: unmatchedEnglish.length,
-                      itemBuilder: (context, i) {
-                        final word = unmatchedEnglish[i];
-                        final isError = errorEnglish == word;
-                        final isFlashing = flashingEnglish == word;
-
-                        return AnimatedBuilder(
-                          animation: _animationController!,
-                          builder: (context, child) {
-                            double shakeOffset = 0;
-                            if (isError) {
-                              final errorValue = _animationController!.value;
-                              shakeOffset = sin(errorValue * pi * 4) * 5;
-                            } else if (isFlashing) {
-                              final successValue = _animationController!.value;
-                              shakeOffset = sin(successValue * pi * 8) * 3;
-                            }
-
-                            return Transform.translate(
-                              offset: Offset(shakeOffset, 0),
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 2.0),
-                                child: InkWell(
-                                  onTap: () => _onEnglishTap(word),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12.0),
-                                    decoration: isFlashing
-                                        ? BoxDecoration(
-                                            color: Colors.green.shade200,
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                          )
-                                        : isError
-                                            ? BoxDecoration(
-                                                color: Colors.red.shade200,
-                                                borderRadius: BorderRadius.circular(8),
-                                              )
-                                            : null,
-                                    child: Text(
-                                      word.english,
-                                      textScaler: const TextScaler.linear(2),
-                                      style: const TextStyle(height: 1.0),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        );
-                      },
+                    child: AnimatedList(
+                      key: _englishListKey,
+                      initialItemCount: englishList.length,
+                      itemBuilder: (c, i, a) => _buildEnglishItem(englishList[i], a),
                     ),
                   ),
                 ],
@@ -577,12 +410,14 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
     return Scaffold(
       body: SafeArea(
         child: isLoading
-            ? _buildLoadingScreen()
+            ? const Center(child: CircularProgressIndicator())
             : error != null
-                ? _buildErrorScreen()
+                ? Center(child: Text(error!))
                 : Column(
                     children: [
-                      _buildHeader(),
+                      Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Text('${currentChunkIndex + 1} / ${chunks.length}', style: const TextStyle(fontSize: 18, color: Colors.black45))),
                       _buildMatchingArea(),
                       if (_isChunkComplete())
                         Padding(
@@ -591,36 +426,37 @@ class _MatchingGameScreenState extends State<MatchingGameScreen>
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               ElevatedButton(
-                                onPressed: _repeatChunk,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                    horizontal: 32,
+                                  onPressed: _loadChunk,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 32,
+                                    ),
                                   ),
-                                ),
-                                child: const Text(
-                                  'Repeat List',
-                                  style: TextStyle(fontSize: 20),
-                                ),
-                              ),
+                                  child: const Text(
+                                    'Repeat List',
+                                    style: TextStyle(fontSize: 20),
+                                  )),
                               const SizedBox(width: 16),
                               ElevatedButton(
-                                onPressed: _nextChunk,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                    horizontal: 32,
+                                  onPressed: () {
+                                    currentChunkIndex = (currentChunkIndex + 1) % chunks.length;
+                                    _loadChunk();
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 32,
+                                    ),
                                   ),
-                                ),
-                                child: const Text(
-                                  'Next List',
-                                  style: TextStyle(fontSize: 20),
-                                ),
-                              ),
+                                  child: const Text(
+                                    'Next List',
+                                    style: TextStyle(fontSize: 20),
+                                  )),
                             ],
                           ),
                         ),
