@@ -265,12 +265,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                     flex: 2,
                     child: Text(pair['hebrew']!.hebrew,
                         style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
-                        textScaler: const TextScaler.linear(2),
+                        textScaler: const TextScaler.linear(1.75),
                         textAlign: TextAlign.right,
                         textDirection: TextDirection.rtl)),
                 const SizedBox(width: 16),
                 Expanded(
-                    flex: 3, child: Text(pair['english']!.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(2))),
+                    flex: 3, child: Text(pair['english']!.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75))),
               ],
             ),
           ),
@@ -299,7 +299,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                 decoration: (isFlashing || isSelected) ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8)) : null,
                 child: Text(word.hebrew,
                     style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
-                    textScaler: const TextScaler.linear(2),
+                    textScaler: const TextScaler.linear(1.75),
                     textAlign: TextAlign.right,
                     textDirection: TextDirection.rtl),
               ),
@@ -329,7 +329,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                 decoration: isFlashing
                     ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8))
                     : (isError ? BoxDecoration(color: Colors.red.shade200, borderRadius: BorderRadius.circular(8)) : null),
-                child: Text(word.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(2)),
+                child: Text(word.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75)),
               ),
             ),
           ),
