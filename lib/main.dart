@@ -51,12 +51,12 @@ class MatchingGameScreen extends StatefulWidget {
 }
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTickerProviderStateMixin {
-  static const String version = '1.4';
+  static const String version = '1.6';
   static const String prefsKey = 'hebrew_matching_progress';
 
-  final GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
-  final GlobalKey<AnimatedListState> _hebrewListKey = GlobalKey<AnimatedListState>();
-  final GlobalKey<AnimatedListState> _englishListKey = GlobalKey<AnimatedListState>();
+  GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
+  GlobalKey<AnimatedListState> _hebrewListKey = GlobalKey<AnimatedListState>();
+  GlobalKey<AnimatedListState> _englishListKey = GlobalKey<AnimatedListState>();
 
   List<List<WordPair>> chunks = [];
   int currentChunkIndex = 0;
@@ -338,9 +338,34 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     );
   }
 
+  void _resetAnimatedListKeys() {
+    _matchedListKey = GlobalKey<AnimatedListState>();
+    _hebrewListKey = GlobalKey<AnimatedListState>();
+    _englishListKey = GlobalKey<AnimatedListState>();
+  }
+
+  void _previousChunk() {
+    _resetAnimatedListKeys();
+    setState(() {
+      currentChunkIndex = (currentChunkIndex - 1 + chunks.length) % chunks.length;
+      _loadChunk();
+    });
+  }
+
+  void _nextChunk() {
+    _resetAnimatedListKeys();
+    setState(() {
+      currentChunkIndex = (currentChunkIndex + 1) % chunks.length;
+      _loadChunk();
+    });
+  }
+
   Widget _buildMatchingArea() {
+    final key = ValueKey('chunk_area_$currentChunkIndex');
+
     if (_isChunkComplete()) {
       return Expanded(
+        key: key,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: ListView(
@@ -351,6 +376,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     }
 
     return Expanded(
+      key: key,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
@@ -367,7 +393,6 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Hebrew column
                   Flexible(
                     flex: 2,
                     child: Padding(
@@ -379,15 +404,11 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                       ),
                     ),
                   ),
-
-                  // THE VERTICAL SEPARATOR
                   Container(
                     width: 1,
                     margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 30),
                     color: Colors.black12,
                   ),
-
-                  // English column
                   Flexible(
                     flex: 3,
                     child: AnimatedList(
@@ -416,50 +437,43 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                 : Column(
                     children: [
                       Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Text('${currentChunkIndex + 1} / ${chunks.length}', style: const TextStyle(fontSize: 18, color: Colors.black45))),
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text('${currentChunkIndex + 1} / ${chunks.length}', style: const TextStyle(fontSize: 18, color: Colors.black45)),
+                      ),
                       _buildMatchingArea(),
-                      if (_isChunkComplete())
-                        Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              ElevatedButton(
-                                  onPressed: _loadChunk,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.orange,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                      horizontal: 32,
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    'Repeat List',
-                                    style: TextStyle(fontSize: 20),
-                                  )),
-                              const SizedBox(width: 16),
-                              ElevatedButton(
-                                  onPressed: () {
-                                    currentChunkIndex = (currentChunkIndex + 1) % chunks.length;
-                                    _loadChunk();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                      horizontal: 32,
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    'Next List',
-                                    style: TextStyle(fontSize: 20),
-                                  )),
-                            ],
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton(
+                              onPressed: _isChunkComplete() ? _loadChunk : _previousChunk,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                              ),
+                              child: Text(
+                                _isChunkComplete() ? 'Repeat List' : 'Previous List',
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton(
+                              onPressed: _nextChunk,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                              ),
+                              child: const Text(
+                                'Next List',
+                                style: TextStyle(fontSize: 18),
+                              ),
+                            ),
+                          ],
                         ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.all(8.0),
                         child: Text(
