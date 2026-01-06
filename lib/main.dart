@@ -5,6 +5,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web/web.dart' as web;
 
 void main() {
   runApp(const MyApp());
@@ -51,7 +52,7 @@ class MatchingGameScreen extends StatefulWidget {
 }
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTickerProviderStateMixin {
-  static const String version = '1.6';
+  static const String version = '1.7';
   static const String prefsKey = 'hebrew_matching_progress';
 
   GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
@@ -62,13 +63,13 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   int currentChunkIndex = 0;
   List<WordPair> currentChunk = [];
   List<WordPair> hebrewList = [];
-  List<WordPair> englishList = [];
-  List<Map<String, WordPair>> matchedPairs = [];
+  List<String> englishList = [];
+  List<WordPair> matchedPairs = [];
 
   WordPair? selectedHebrew;
-  WordPair? errorEnglish;
+  String? errorEnglish;
   WordPair? flashingHebrew;
-  WordPair? flashingEnglish;
+  String? flashingEnglish;
 
   bool isLoading = true;
   bool isProcessing = false;
@@ -140,7 +141,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
     return rawChunks.expand((chunk) {
       chunk.shuffle();
-      return chunk.length > 6 ? _splitIntoBalancedChunks(chunk, 6) : [chunk];
+      return chunk.length > 7 ? _splitIntoBalancedChunks(chunk, 6) : [chunk];
     }).toList();
   }
 
@@ -173,11 +174,11 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     setState(() {
       currentChunk = List.from(chunks[currentChunkIndex]);
       hebrewList = List.from(currentChunk);
-      englishList = List.from(currentChunk);
+      englishList = currentChunk.map((x) => x.english).toList();
 
       final nextIdx = (currentChunkIndex + 1) % chunks.length;
       final extraWord = chunks[nextIdx][Random().nextInt(chunks[nextIdx].length)];
-      englishList.add(extraWord);
+      englishList.add(extraWord.english);
 
       hebrewList.shuffle();
       englishList.shuffle();
@@ -199,36 +200,38 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     });
   }
 
-  void _onEnglishTap(WordPair word) async {
+  void _onEnglishTap(String englishWord) async {
     if (selectedHebrew == null || isProcessing) return;
 
-    if (selectedHebrew == word) {
+    if (selectedHebrew!.english == englishWord) {
       setState(() {
         isProcessing = true;
         flashingHebrew = selectedHebrew;
-        flashingEnglish = word;
+        flashingEnglish = englishWord;
       });
       await Future.delayed(const Duration(milliseconds: 600));
 
       final hIdx = hebrewList.indexOf(selectedHebrew!);
-      final eIdx = englishList.indexOf(word);
-      final pair = {'hebrew': selectedHebrew!, 'english': word};
+      final eIdx = englishList.indexOf(englishWord);
+      final matchedHebrew = selectedHebrew!; // Capture before using in closures
 
-      matchedPairs.add(pair);
+      matchedPairs.add(matchedHebrew);
       _matchedListKey.currentState?.insertItem(matchedPairs.length - 1);
 
       hebrewList.removeAt(hIdx);
-      _hebrewListKey.currentState?.removeItem(hIdx, (c, a) => _buildHebrewItem(pair['hebrew']!, a, true));
+      _hebrewListKey.currentState?.removeItem(hIdx, (c, a) => _buildHebrewItem(matchedHebrew, a, true));
 
       englishList.removeAt(eIdx);
-      _englishListKey.currentState?.removeItem(eIdx, (c, a) => _buildEnglishItem(pair['english']!, a, true));
+      _englishListKey.currentState?.removeItem(eIdx, (c, a) => _buildEnglishItem(englishWord, a, true));
 
       if (hebrewList.isEmpty) {
         await Future.delayed(const Duration(milliseconds: 300));
         if (englishList.isNotEmpty) {
           final last = englishList.removeAt(0);
           _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true));
+          await Future.delayed(const Duration(milliseconds: 350)); // wait for animation
         }
+        _resetAnimatedListKeys();
       }
 
       setState(() {
@@ -239,7 +242,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       });
     } else {
       setState(() {
-        errorEnglish = word;
+        errorEnglish = englishWord;
         isProcessing = true;
       });
       await _animationController?.forward(from: 0.0);
@@ -252,7 +255,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
   bool _isChunkComplete() => hebrewList.isEmpty && !isProcessing;
 
-  Widget _buildMatchedPairItem(Map<String, WordPair> pair, Animation<double> animation) {
+  void _openExternalLink(String link) {
+    final jsUrl = Uri.encodeFull(link);
+    web.window.open(jsUrl, '_blank');
+  }
+
+  Widget _buildMatchedPairItem(WordPair pair, Animation<double> animation) {
     return SizeTransition(
       sizeFactor: animation,
       child: Column(
@@ -262,15 +270,30 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
             child: Row(
               children: [
                 Expanded(
-                    flex: 2,
-                    child: Text(pair['hebrew']!.hebrew,
-                        style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
-                        textScaler: const TextScaler.linear(1.75),
-                        textAlign: TextAlign.right,
-                        textDirection: TextDirection.rtl)),
+                  flex: 2,
+                  child: InkWell(
+                    onTap: () => _openExternalLink('https://www.pealim.com/search/?q=${pair.hebrew}'),
+                    child: Text(
+                      pair.hebrew,
+                      style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
+                      textScaler: const TextScaler.linear(1.75),
+                      textAlign: TextAlign.right,
+                      textDirection: TextDirection.rtl,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 16),
                 Expanded(
-                    flex: 3, child: Text(pair['english']!.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75))),
+                  flex: 3,
+                  child: InkWell(
+                    onTap: () => _openExternalLink('https://context.reverso.net/translation/hebrew-english/${pair.hebrew}'),
+                    child: Text(
+                      pair.english,
+                      style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
+                      textScaler: const TextScaler.linear(1.75),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -310,7 +333,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     );
   }
 
-  Widget _buildEnglishItem(WordPair word, Animation<double> animation, [bool isRemoving = false]) {
+  Widget _buildEnglishItem(String word, Animation<double> animation, [bool isRemoving = false]) {
     final isError = !isRemoving && errorEnglish == word;
     final isFlashing = !isRemoving && flashingEnglish == word;
 
@@ -329,7 +352,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                 decoration: isFlashing
                     ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8))
                     : (isError ? BoxDecoration(color: Colors.red.shade200, borderRadius: BorderRadius.circular(8)) : null),
-                child: Text(word.english, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75)),
+                child: Text(word, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75)),
               ),
             ),
           ),
@@ -346,17 +369,32 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
   void _previousChunk() {
     _resetAnimatedListKeys();
-    setState(() {
-      currentChunkIndex = (currentChunkIndex - 1 + chunks.length) % chunks.length;
-      _loadChunk();
-    });
+    currentChunkIndex = (currentChunkIndex - 1 + chunks.length) % chunks.length;
+    _loadChunk();
   }
 
   void _nextChunk() {
     _resetAnimatedListKeys();
+    currentChunkIndex = (currentChunkIndex + 1) % chunks.length;
+    _loadChunk();
+  }
+
+  void _orderChunk() {
+    if (chunks.isEmpty) return;
+
+    _resetAnimatedListKeys();
+
     setState(() {
-      currentChunkIndex = (currentChunkIndex + 1) % chunks.length;
-      _loadChunk();
+      matchedPairs = List.from(currentChunk);
+
+      hebrewList = [];
+      englishList = [];
+
+      selectedHebrew = null;
+      errorEnglish = null;
+      flashingHebrew = null;
+      flashingEnglish = null;
+      isProcessing = false;
     });
   }
 
@@ -447,14 +485,27 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             ElevatedButton(
-                              onPressed: _isChunkComplete() ? _loadChunk : _previousChunk,
+                              onPressed: _previousChunk,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.indigoAccent,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                              ),
+                              child: const Text(
+                                'Previous',
+                                style: TextStyle(fontSize: 18),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            ElevatedButton(
+                              onPressed: _isChunkComplete() ? _loadChunk : _orderChunk,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
                               ),
                               child: Text(
-                                _isChunkComplete() ? 'Repeat List' : 'Previous List',
+                                _isChunkComplete() ? 'Random' : 'Ordered',
                                 style: const TextStyle(fontSize: 18),
                               ),
                             ),
@@ -467,7 +518,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                                 padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
                               ),
                               child: const Text(
-                                'Next List',
+                                'Next',
                                 style: TextStyle(fontSize: 18),
                               ),
                             ),
