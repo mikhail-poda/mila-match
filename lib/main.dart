@@ -52,7 +52,7 @@ class MatchingGameScreen extends StatefulWidget {
 }
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTickerProviderStateMixin {
-  static const String version = '1.8';
+  static const String version = '1.9';
   static const String prefsKey = 'hebrew_matching_progress';
 
   GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
@@ -62,13 +62,20 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   List<List<WordPair>> chunks = [];
   int currentChunkIndex = 0;
   List<WordPair> currentChunk = [];
-  List<WordPair> hebrewList = [];
+  List<String> hebrewList = [];
   List<String> englishList = [];
   List<WordPair> matchedPairs = [];
 
-  WordPair? selectedHebrew;
+  // Selection state - only one can be selected at a time
+  String? selectedHebrew;
+  String? selectedEnglish;
+
+  // Error state for both sides
+  String? errorHebrew;
   String? errorEnglish;
-  WordPair? flashingHebrew;
+
+  // Flashing state for match animation
+  String? flashingHebrew;
   String? flashingEnglish;
 
   bool isLoading = true;
@@ -117,9 +124,11 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       isAudioMode = !isAudioMode;
       if (isAudioMode) {
         selectedHebrew = null;
+        selectedEnglish = null;
         _dictateNextWord();
       } else {
         selectedHebrew = null;
+        selectedEnglish = null;
         web.window.speechSynthesis.cancel();
       }
     });
@@ -138,9 +147,10 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
     setState(() {
       selectedHebrew = word;
+      selectedEnglish = null;
     });
 
-    _playHebrewWord(word.hebrew);
+    _playHebrewWord(word);
   }
 
   Future<void> _loadVocabulary() async {
@@ -224,7 +234,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     if (chunks.isEmpty) return;
     setState(() {
       currentChunk = List.from(chunks[currentChunkIndex]);
-      hebrewList = List.from(currentChunk);
+      hebrewList = currentChunk.map((x) => x.hebrew).toList();
       englishList = currentChunk.map((x) => x.english).toList();
 
       // Determine if current chunk contains verbs
@@ -249,6 +259,8 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       englishList.shuffle();
       matchedPairs = [];
       selectedHebrew = null;
+      selectedEnglish = null;
+      errorHebrew = null;
       errorEnglish = null;
       flashingHebrew = null;
       flashingEnglish = null;
@@ -260,75 +272,135 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     _saveProgress();
   }
 
-  void _onHebrewTap(WordPair word) {
-    if (isProcessing || isAudioMode) return; // Disable Hebrew tapping in audio mode
-    setState(() {
-      selectedHebrew = word;
-      errorEnglish = null;
-    });
+  // Find a matching pair from currentChunk given hebrew and english strings
+  WordPair? _findMatchingPair(String hebrew, String english) {
+    for (final pair in currentChunk) {
+      if (pair.hebrew == hebrew && pair.english == english) {
+        return pair;
+      }
+    }
+    return null;
   }
 
-  void _onEnglishTap(String englishWord) async {
-    if (selectedHebrew == null || isProcessing) return;
+  // Check if an English word is a distractor (not in currentChunk)
+  bool _isDistractor(String english) {
+    return !currentChunk.any((pair) => pair.english == english);
+  }
 
-    if (selectedHebrew!.english == englishWord) {
-      setState(() {
-        isProcessing = true;
-        flashingHebrew = selectedHebrew;
-        flashingEnglish = englishWord;
-      });
-      await Future.delayed(const Duration(milliseconds: 600));
+  void _onHebrewTap(String hebrew) async {
+    if (isProcessing || isAudioMode) return;
 
-      final hIdx = hebrewList.indexOf(selectedHebrew!);
-      final eIdx = englishList.indexOf(englishWord);
-      final matchedHebrew = selectedHebrew!; // Capture before using in closures
-
-      matchedPairs.add(matchedHebrew);
-      _matchedListKey.currentState?.insertItem(matchedPairs.length - 1);
-
-      hebrewList.removeAt(hIdx);
-      _hebrewListKey.currentState?.removeItem(hIdx, (c, a) => _buildHebrewItem(matchedHebrew, a, true));
-
-      englishList.removeAt(eIdx);
-      _englishListKey.currentState?.removeItem(eIdx, (c, a) => _buildEnglishItem(englishWord, a, true));
-
-      if (hebrewList.isEmpty) {
-        await Future.delayed(const Duration(milliseconds: 300));
-        if (englishList.isNotEmpty) {
-          final last = englishList.removeAt(0);
-          _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true));
-          await Future.delayed(const Duration(milliseconds: 350)); // wait for animation
-        }
-        _resetAnimatedListKeys();
-
-        // Turn off audio mode when chunk is complete
+    // If English is already selected, try to match
+    if (selectedEnglish != null) {
+      final matchedPair = _findMatchingPair(hebrew, selectedEnglish!);
+      if (matchedPair != null) {
+        await _handleCorrectMatch(matchedPair);
+      } else {
+        // Wrong match - show error on Hebrew
         setState(() {
-          isAudioMode = false;
+          errorHebrew = hebrew;
+          isProcessing = true;
+        });
+        await _animationController?.forward(from: 0.0);
+        setState(() {
+          errorHebrew = null;
+          isProcessing = false;
         });
       }
-
+    } else {
+      // No English selected - select this Hebrew
       setState(() {
-        selectedHebrew = null;
-        flashingHebrew = null;
-        flashingEnglish = null;
-        isProcessing = false;
+        selectedHebrew = hebrew;
+        selectedEnglish = null;
+        errorHebrew = null;
+        errorEnglish = null;
       });
+    }
+  }
 
-      // In audio mode, dictate the next word after a delay
-      if (isAudioMode && hebrewList.isNotEmpty) {
-        await Future.delayed(const Duration(seconds: 1));
-        _dictateNextWord();
+  void _onEnglishTap(String english) async {
+    if (isProcessing) return;
+
+    // If Hebrew is already selected, try to match
+    if (selectedHebrew != null) {
+      final matchedPair = _findMatchingPair(selectedHebrew!, english);
+      if (matchedPair != null) {
+        await _handleCorrectMatch(matchedPair);
+      } else {
+        // Wrong match - show error on English
+        setState(() {
+          errorEnglish = english;
+          isProcessing = true;
+        });
+        await _animationController?.forward(from: 0.0);
+        setState(() {
+          errorEnglish = null;
+          isProcessing = false;
+        });
       }
     } else {
+      // No Hebrew selected - select this English (unless it's a distractor)
+      if (_isDistractor(english)) {
+        // Don't select distractors
+        return;
+      }
       setState(() {
-        errorEnglish = englishWord;
-        isProcessing = true;
-      });
-      await _animationController?.forward(from: 0.0);
-      setState(() {
+        selectedEnglish = english;
+        selectedHebrew = null;
+        errorHebrew = null;
         errorEnglish = null;
-        isProcessing = false;
       });
+    }
+  }
+
+  Future<void> _handleCorrectMatch(WordPair matchedPair) async {
+    setState(() {
+      isProcessing = true;
+      flashingHebrew = matchedPair.hebrew;
+      flashingEnglish = matchedPair.english;
+    });
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    final hIdx = hebrewList.indexOf(matchedPair.hebrew);
+    final eIdx = englishList.indexOf(matchedPair.english);
+
+    matchedPairs.add(matchedPair);
+    _matchedListKey.currentState?.insertItem(matchedPairs.length - 1);
+
+    hebrewList.removeAt(hIdx);
+    _hebrewListKey.currentState?.removeItem(hIdx, (c, a) => _buildHebrewItem(matchedPair.hebrew, a, true));
+
+    englishList.removeAt(eIdx);
+    _englishListKey.currentState?.removeItem(eIdx, (c, a) => _buildEnglishItem(matchedPair.english, a, true));
+
+    if (hebrewList.isEmpty) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      // Remove remaining distractor(s)
+      while (englishList.isNotEmpty) {
+        final last = englishList.removeAt(0);
+        _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true));
+        await Future.delayed(const Duration(milliseconds: 350));
+      }
+      _resetAnimatedListKeys();
+
+      // Turn off audio mode when chunk is complete
+      setState(() {
+        isAudioMode = false;
+      });
+    }
+
+    setState(() {
+      selectedHebrew = null;
+      selectedEnglish = null;
+      flashingHebrew = null;
+      flashingEnglish = null;
+      isProcessing = false;
+    });
+
+    // In audio mode, dictate the next word after a delay
+    if (isAudioMode && hebrewList.isNotEmpty) {
+      await Future.delayed(const Duration(seconds: 1));
+      _dictateNextWord();
     }
   }
 
@@ -382,14 +454,15 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     );
   }
 
-  Widget _buildHebrewItem(WordPair word, Animation<double> animation, [bool isRemoving = false]) {
+  Widget _buildHebrewItem(String word, Animation<double> animation, [bool isRemoving = false]) {
     final isSelected = !isRemoving && selectedHebrew == word;
     final isFlashing = !isRemoving && flashingHebrew == word;
+    final isError = !isRemoving && errorHebrew == word;
 
     return AnimatedBuilder(
       animation: _animationController!,
       builder: (context, child) {
-        final offset = isFlashing ? sin(_animationController!.value * pi * 8) * 3 : 0.0;
+        double offset = isError ? sin(_animationController!.value * pi * 4) * 5 : (isFlashing ? sin(_animationController!.value * pi * 8) * 3 : 0.0);
         return Transform.translate(
           offset: Offset(offset, 0),
           child: Padding(
@@ -398,8 +471,10 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
               onTap: isRemoving ? null : () => _onHebrewTap(word),
               child: Container(
                 padding: const EdgeInsets.all(12.0),
-                decoration: (isFlashing || isSelected) ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8)) : null,
-                child: Text(word.hebrew,
+                decoration: isFlashing || isSelected
+                    ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8))
+                    : (isError ? BoxDecoration(color: Colors.red.shade200, borderRadius: BorderRadius.circular(8)) : null),
+                child: Text(word,
                     style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0),
                     textScaler: const TextScaler.linear(1.75),
                     textAlign: TextAlign.right,
@@ -413,6 +488,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   }
 
   Widget _buildEnglishItem(String word, Animation<double> animation, [bool isRemoving = false]) {
+    final isSelected = !isRemoving && selectedEnglish == word;
     final isError = !isRemoving && errorEnglish == word;
     final isFlashing = !isRemoving && flashingEnglish == word;
 
@@ -428,7 +504,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
               onTap: isRemoving ? null : () => _onEnglishTap(word),
               child: Container(
                 padding: const EdgeInsets.all(12.0),
-                decoration: isFlashing
+                decoration: isFlashing || isSelected
                     ? BoxDecoration(color: Colors.green.shade200, borderRadius: BorderRadius.circular(8))
                     : (isError ? BoxDecoration(color: Colors.red.shade200, borderRadius: BorderRadius.circular(8)) : null),
                 child: Text(word, style: const TextStyle(fontWeight: FontWeight.normal, height: 1.0), textScaler: const TextScaler.linear(1.75)),
@@ -470,6 +546,8 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       englishList = [];
 
       selectedHebrew = null;
+      selectedEnglish = null;
+      errorHebrew = null;
       errorEnglish = null;
       flashingHebrew = null;
       flashingEnglish = null;
