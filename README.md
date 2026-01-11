@@ -1,16 +1,40 @@
-# mila_match
+## Mila Match - Hebrew Vocabulary Learning Game
 
-Hebrew Learning using Matching Pairs
+### Overview
+A matching game to practice Hebrew-English vocabulary. Match Hebrew words with their English translations by tapping pairs.
 
-## Getting Started
+### Gameplay
 
-This project is a starting point for a Flutter application.
+**Basic Mode:**
+- Hebrew words appear on the left, English translations on the right
+- Tap a Hebrew word to select it (highlights green)
+- Tap the matching English word
+- Correct match: pair moves to the "done" list at the top
+- Wrong match: red shake animation
+- One extra English word is added as a distractor
 
-A few resources to get you started if this is your first Flutter project:
+**Audio Dictation Mode:**
+- Tap the play button to start
+- Hebrew words are hidden and spoken aloud via text-to-speech
+- Listen and tap the correct English translation
+- After each correct match, the next word is automatically dictated
+- Tap pause to return to normal mode
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+**Writing Mode:**
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+`// todo`
+
+### Navigation
+
+| Button | Function                                          |
+|--------|---------------------------------------------------|
+| ◀      | Previous chunk                                    |
+| ▶/⏸    | Start/stop audio dictation mode                   |
+| ≡ / ⟳   | Show all pairs in order / reshuffle current chunk |
+| ▶      | Next chunk                                        |
+
+### Features
+- Progress automatically saved between sessions
+- Tap completed Hebrew words to open [Pealim](https://www.pealim.com) conjugation
+- Tap completed English words to open [Reverso Context](https://context.reverso.net) examples
+- Vocabulary organized in chunks of up to 6 pairs

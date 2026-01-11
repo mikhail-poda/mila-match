@@ -52,7 +52,7 @@ class MatchingGameScreen extends StatefulWidget {
 }
 
 class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTickerProviderStateMixin {
-  static const String version = '1.7';
+  static const String version = '1.8';
   static const String prefsKey = 'hebrew_matching_progress';
 
   GlobalKey<AnimatedListState> _matchedListKey = GlobalKey<AnimatedListState>();
@@ -76,6 +76,9 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   String? error;
   AnimationController? _animationController;
 
+  // Audio dictation mode state
+  bool isAudioMode = false;
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +93,54 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   void dispose() {
     _animationController?.dispose();
     super.dispose();
+  }
+
+  void _playHebrewWord(String hebrewWord) {
+    try {
+      final speechSynthesis = web.window.speechSynthesis;
+      final utterance = web.SpeechSynthesisUtterance(hebrewWord);
+
+      utterance.lang = 'he-IL';
+      utterance.rate = 0.8;
+      utterance.pitch = 1.0;
+
+      speechSynthesis.speak(utterance);
+    } catch (e) {
+      debugPrint('TTS error: $e');
+    }
+  }
+
+  void _toggleAudioMode() {
+    if (isProcessing) return;
+
+    setState(() {
+      isAudioMode = !isAudioMode;
+      if (isAudioMode) {
+        selectedHebrew = null;
+        _dictateNextWord();
+      } else {
+        selectedHebrew = null;
+        web.window.speechSynthesis.cancel();
+      }
+    });
+  }
+
+  void _dictateNextWord() {
+    if (hebrewList.isEmpty) {
+      setState(() {
+        isAudioMode = false;
+      });
+      return;
+    }
+
+    final randomIndex = Random().nextInt(hebrewList.length);
+    final word = hebrewList[randomIndex];
+
+    setState(() {
+      selectedHebrew = word;
+    });
+
+    _playHebrewWord(word.hebrew);
   }
 
   Future<void> _loadVocabulary() async {
@@ -176,9 +227,23 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       hebrewList = List.from(currentChunk);
       englishList = currentChunk.map((x) => x.english).toList();
 
-      final nextIdx = (currentChunkIndex + 1) % chunks.length;
-      final extraWord = chunks[nextIdx][Random().nextInt(chunks[nextIdx].length)];
-      englishList.add(extraWord.english);
+      // Determine if current chunk contains verbs
+      final isVerbChunk = currentChunk.first.english.startsWith('to ');
+
+      // Find extraWord from same category (verb or not-verb)
+      WordPair? extraWord;
+      for (int i = 1; i < chunks.length; i++) {
+        final idx = (currentChunkIndex + i) % chunks.length;
+        final candidate = chunks[idx][Random().nextInt(chunks[idx].length)];
+        final isVerb = candidate.english.startsWith('to ');
+        if (isVerb == isVerbChunk) {
+          extraWord = candidate;
+          break;
+        }
+      }
+      if (extraWord != null) {
+        englishList.add(extraWord.english);
+      }
 
       hebrewList.shuffle();
       englishList.shuffle();
@@ -188,12 +253,15 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       flashingHebrew = null;
       flashingEnglish = null;
       isProcessing = false;
+
+      // Reset audio mode state
+      isAudioMode = false;
     });
     _saveProgress();
   }
 
   void _onHebrewTap(WordPair word) {
-    if (isProcessing) return;
+    if (isProcessing || isAudioMode) return; // Disable Hebrew tapping in audio mode
     setState(() {
       selectedHebrew = word;
       errorEnglish = null;
@@ -232,6 +300,11 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
           await Future.delayed(const Duration(milliseconds: 350)); // wait for animation
         }
         _resetAnimatedListKeys();
+
+        // Turn off audio mode when chunk is complete
+        setState(() {
+          isAudioMode = false;
+        });
       }
 
       setState(() {
@@ -240,6 +313,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
         flashingEnglish = null;
         isProcessing = false;
       });
+
+      // In audio mode, dictate the next word after a delay
+      if (isAudioMode && hebrewList.isNotEmpty) {
+        await Future.delayed(const Duration(seconds: 1));
+        _dictateNextWord();
+      }
     } else {
       setState(() {
         errorEnglish = englishWord;
@@ -395,6 +474,9 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
       flashingHebrew = null;
       flashingEnglish = null;
       isProcessing = false;
+
+      // Reset audio mode state
+      isAudioMode = false;
     });
   }
 
@@ -431,14 +513,21 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Hebrew list - hidden in audio mode
                   Flexible(
                     flex: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 22.0),
-                      child: AnimatedList(
-                        key: _hebrewListKey,
-                        initialItemCount: hebrewList.length,
-                        itemBuilder: (c, i, a) => _buildHebrewItem(hebrewList[i], a),
+                    child: Visibility(
+                      visible: !isAudioMode,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 22.0),
+                        child: AnimatedList(
+                          key: _hebrewListKey,
+                          initialItemCount: hebrewList.length,
+                          itemBuilder: (c, i, a) => _buildHebrewItem(hebrewList[i], a),
+                        ),
                       ),
                     ),
                   ),
@@ -484,43 +573,63 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
+                            // Previous - blue
                             ElevatedButton(
                               onPressed: _previousChunk,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.indigoAccent,
+                                backgroundColor: Colors.blue,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                                padding: const EdgeInsets.all(16),
+                                shape: const CircleBorder(),
                               ),
-                              child: const Text(
-                                'Previous',
-                                style: TextStyle(fontSize: 18),
-                              ),
+                              child: const Icon(Icons.chevron_left, size: 28),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 12),
+                            // Play/Pause - gray (only if chunk not complete)
+                            ElevatedButton(
+                              onPressed: _isChunkComplete() ? null : _toggleAudioMode,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: Colors.grey.shade300,
+                                disabledForegroundColor: Colors.white54,
+                                padding: const EdgeInsets.all(16),
+                                shape: const CircleBorder(),
+                              ),
+                              child: Icon(isAudioMode ? Icons.pause : Icons.play_arrow, size: 28),
+                            ),
+                            const SizedBox(width: 12),
+                            // Random/Ordered - orange
                             ElevatedButton(
                               onPressed: _isChunkComplete() ? _loadChunk : _orderChunk,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                                padding: const EdgeInsets.all(16),
+                                shape: const CircleBorder(),
                               ),
-                              child: Text(
-                                _isChunkComplete() ? 'Random' : 'Ordered',
-                                style: const TextStyle(fontSize: 18),
+                              child: SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: Center(
+                                  child: Text(
+                                    _isChunkComplete() ? '⟳' : '≡',
+                                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.0),
+                                  ),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 16),
+                            const SizedBox(width: 12),
+                            // Next - green
                             ElevatedButton(
                               onPressed: _nextChunk,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.green,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                                padding: const EdgeInsets.all(16),
+                                shape: const CircleBorder(),
                               ),
-                              child: const Text(
-                                'Next',
-                                style: TextStyle(fontSize: 18),
-                              ),
+                              child: const Icon(Icons.chevron_right, size: 28),
                             ),
                           ],
                         ),
