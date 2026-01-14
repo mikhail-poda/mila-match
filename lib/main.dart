@@ -458,11 +458,10 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
     if (hebrewList.isEmpty) {
       await Future.delayed(const Duration(milliseconds: 300));
-      // Remove remaining distractor(s)
+      // Remove remaining distractor(s) instantly
       while (englishList.isNotEmpty) {
         final last = englishList.removeAt(0);
-        _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true));
-        await Future.delayed(const Duration(milliseconds: 350));
+        _englishListKey.currentState?.removeItem(0, (c, a) => _buildEnglishItem(last, a, true), duration: const Duration(milliseconds: 200));
       }
       _resetAnimatedListKeys();
     }
