@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web/web.dart' as web;
 
-enum GameMode { normal, audio, typing }
+enum GameMode { normal, audioAssist, audio, typing }
 
 void main() {
   runApp(const MyApp());
@@ -192,7 +192,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     });
 
     // Handle mode transitions
-    if (previousMode == GameMode.audio) {
+    if (previousMode == GameMode.audio || previousMode == GameMode.audioAssist) {
       web.window.speechSynthesis.cancel();
     }
 
@@ -357,7 +357,12 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   }
 
   void _onHebrewTap(String hebrew) async {
-    if (isProcessing || gameMode != GameMode.normal) return;
+    if (isProcessing || (gameMode != GameMode.normal && gameMode != GameMode.audioAssist)) return;
+
+    // Play audio in audioAssist mode
+    if (gameMode == GameMode.audioAssist) {
+      _playHebrewWord(hebrew);
+    }
 
     // If English is already selected, try to match
     if (selectedEnglish != null) {
@@ -695,6 +700,8 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
     switch (mode) {
       case GameMode.normal:
         return Icons.compare_arrows;
+      case GameMode.audioAssist:
+        return Icons.hearing;
       case GameMode.audio:
         return Icons.volume_up;
       case GameMode.typing:
@@ -737,7 +744,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                   alignment: Alignment.centerRight,
                   child: _isModeSwitchExpanded
                       ? SizedBox(
-                          width: 220,
+                          width: 290,
                           height: 48,
                           child: AnimatedToggleSwitch<GameMode>.size(
                             current: gameMode,
@@ -818,7 +825,7 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                   Flexible(
                     flex: 2,
                     child: Visibility(
-                      visible: gameMode == GameMode.normal,
+                      visible: gameMode == GameMode.normal || gameMode == GameMode.audioAssist,
                       maintainSize: true,
                       maintainAnimation: true,
                       maintainState: true,
