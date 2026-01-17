@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -94,6 +95,9 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
   final TextEditingController _hebrewInputController = TextEditingController();
   final FocusNode _hebrewInputFocusNode = FocusNode();
 
+  // Timer for long-press repeat functionality
+  Timer? _repeatTimer;
+
   @override
   void initState() {
     super.initState();
@@ -106,10 +110,26 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
 
   @override
   void dispose() {
+    _repeatTimer?.cancel();
     _animationController?.dispose();
     _hebrewInputController.dispose();
     _hebrewInputFocusNode.dispose();
     super.dispose();
+  }
+
+  // Long-press repeat helpers
+  void _startRepeating(VoidCallback action) {
+    // After initial delay, start repeating rapidly
+    _repeatTimer = Timer(const Duration(milliseconds: 500), () {
+      _repeatTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        action();
+      });
+    });
+  }
+
+  void _stopRepeating() {
+    _repeatTimer?.cancel();
+    _repeatTimer = null;
   }
 
   void _playHebrewWord(String hebrewWord) {
@@ -884,16 +904,20 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Previous - blue
-                            ElevatedButton(
-                              onPressed: _previousChunk,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
+                            // Previous - blue (with long-press repeat)
+                            GestureDetector(
+                              onTap: _previousChunk,
+                              onLongPressStart: (_) => _startRepeating(_previousChunk),
+                              onLongPressEnd: (_) => _stopRepeating(),
+                              onLongPressCancel: _stopRepeating,
+                              child: Container(
                                 padding: const EdgeInsets.all(16),
-                                shape: const CircleBorder(),
+                                decoration: const BoxDecoration(
+                                  color: Colors.blue,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.chevron_left, size: 28, color: Colors.white),
                               ),
-                              child: const Icon(Icons.chevron_left, size: 28),
                             ),
                             const SizedBox(width: 12),
                             // Random/Ordered - orange
@@ -917,16 +941,20 @@ class _MatchingGameScreenState extends State<MatchingGameScreen> with SingleTick
                               ),
                             ),
                             const SizedBox(width: 12),
-                            // Next - green
-                            ElevatedButton(
-                              onPressed: _nextChunk,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
+                            // Next - green (with long-press repeat)
+                            GestureDetector(
+                              onTap: _nextChunk,
+                              onLongPressStart: (_) => _startRepeating(_nextChunk),
+                              onLongPressEnd: (_) => _stopRepeating(),
+                              onLongPressCancel: _stopRepeating,
+                              child: Container(
                                 padding: const EdgeInsets.all(16),
-                                shape: const CircleBorder(),
+                                decoration: const BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.chevron_right, size: 28, color: Colors.white),
                               ),
-                              child: const Icon(Icons.chevron_right, size: 28),
                             ),
                           ],
                         ),
